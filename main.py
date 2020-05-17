@@ -5,24 +5,7 @@ import webapp2
 import json
 import array as arr
 import datetime
-
-
-def get(self):
-    self.response.headers.add_header('Access-Control-Allow-Origin', '*')
-    self.response.headers['Content-Type'] = 'application/json'
-    # do something
-
-
-def postValue(self):
-    self.response.headers.add_header('Access-Control-Allow-Origin', '*')
-    self.response.headers['Content-Type'] = 'application/json'
-    # do something
-
-
-def options(self):
-    self.response.headers['Access-Control-Allow-Origin'] = '*'
-    self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
-    self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
+from google.appengine.api import search
 
 # -------------------- POST ----------------------
 
@@ -160,6 +143,38 @@ class PostSubEdit(webapp2.RequestHandler):
         self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
         self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
 
+
+class PostGetByTitle(webapp2.RequestHandler):
+    def get(self, title_post_search):
+        self.response.write(title_post_search)
+
+
+class PostGetByCategory(webapp2.RequestHandler):
+    def get(self, categoryID_post_search):
+        query = Post.query(Post.category_id == int(categoryID_post_search))
+        data_json = [
+            {
+                "id": c.key.id(),
+                "title": c.title,
+                "sapo": c.sapo,
+                "category": {
+                    "id": c.category_id,
+                    "label": ndb.Key("Category", int(c.category_id)).get().nameCategory
+                },
+                "date_joined": str(c.date_joined),
+                "description": c.description,
+                "image": c.image,
+            }
+            for c in query]
+
+        self.response.out.write(json.dumps(data_json))
+
+    def options(self):
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
+        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
+
+
 # -------------------- CATEGORY ----------------------
 
 
@@ -199,6 +214,8 @@ class CategorySubDelete(webapp2.RequestHandler):
                 self.response.out.write("Delete  Fail")
         else:
             self.response.out.write("A post have this category\nFail delete")
+
+        self.r
 
     def options(self):
         self.response.headers['Access-Control-Allow-Origin'] = '*'
@@ -244,6 +261,8 @@ class CategoryGetAll(webapp2.RequestHandler):
         self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
         self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
+
+
 # ----------------------------------------------------
 
 
@@ -258,4 +277,7 @@ app = webapp2.WSGIApplication([
     webapp2.Route("/addPost", PostSubAdd),
     webapp2.Route("/editPost", PostSubEdit),
     webapp2.Route("/post/json", PostGetAll),
+    webapp2.Route("/post/title/<title_post_search>/json", PostGetByTitle),
+    webapp2.Route("/post/category/<categoryID_post_search:\d+>/json",
+                  PostGetByCategory, methods=['GET']),
 ], debug=True)

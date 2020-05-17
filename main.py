@@ -39,11 +39,7 @@ class Post(ndb.Model):
 
 class PostSubAdd(webapp2.RequestHandler):
     def post(self):
-        self.response.headers['Access-Control-Allow-Origin'] = '*'
-        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
-        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
-        # Put image
-
+        self.options()
         # Put post main
         title = self.request.get('title')
         category_id = self.request.get('category_id')
@@ -72,6 +68,11 @@ class PostSubAdd(webapp2.RequestHandler):
                 self.response.out.write("Fail because of none category_id")
         else:
             self.response.out.write("Fail because of none title")
+
+    def options(self):
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
+        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
 
 
 class PostGetAll(webapp2.RequestHandler):
@@ -169,9 +170,7 @@ class Category(ndb.Model):
 
 class CategorySubAdd(webapp2.RequestHandler):
     def post(self):
-        self.response.headers['Access-Control-Allow-Origin'] = '*'
-        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
-        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
+        self.options()
 
         nameCategory = self.request.get('name')
         if nameCategory != None and nameCategory != '':
@@ -181,12 +180,30 @@ class CategorySubAdd(webapp2.RequestHandler):
         else:
             self.response.out.write("Fail")
 
+    def options(self):
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
+        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
+
 
 class CategorySubDelete(webapp2.RequestHandler):
     def post(self):
-        idCategory = self.request.get('id')
-        ndb.Key("Category", int(idCategory)).delete()
-        self.redirect("http://localhost:1962/#categoryview")
+        self.options()
+
+        idCategory = int(self.request.get('id'))
+        if Post.query(Post.category_id == idCategory).get() == None:
+            if idCategory != None and idCategory != '':
+                ndb.Key("Category", idCategory).delete()
+                self.response.out.write("Delete complete")
+            else:
+                self.response.out.write("Delete  Fail")
+        else:
+            self.response.out.write("A post have this category\nFail delete")
+
+    def options(self):
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
+        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
 
 
 class CategorySubEdit(webapp2.RequestHandler):
@@ -232,13 +249,13 @@ class CategoryGetAll(webapp2.RequestHandler):
 
 app = webapp2.WSGIApplication([
     # Route category
-    ('/addCategory', CategorySubAdd),
-    ('/deleteCategory', CategorySubDelete),
-    ('/editCategory', CategorySubEdit),
-    ('/category/json', CategoryGetAll),
+    webapp2.Route('/addCategory', CategorySubAdd),
+    webapp2.Route('/deleteCategory', CategorySubDelete),
+    webapp2.Route('/editCategory', CategorySubEdit),
+    webapp2.Route('/category/json', CategoryGetAll),
 
     # Route post
-    ("/addPost", PostSubAdd),
-    ("/editPost", PostSubEdit),
-    ("/post/json", PostGetAll),
+    webapp2.Route("/addPost", PostSubAdd),
+    webapp2.Route("/editPost", PostSubEdit),
+    webapp2.Route("/post/json", PostGetAll),
 ], debug=True)

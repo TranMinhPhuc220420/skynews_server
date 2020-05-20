@@ -5,22 +5,7 @@ import json
 from google.appengine.ext.webapp import blobstore_handlers
 from google.appengine.ext import blobstore
 
-# -------------------- PHOTO ----------------------
-
-
-class Photo(ndb.Model):
-    blob_key = ndb.BlobKeyProperty()
-
-    @classmethod
-    def get_by_key(cls, blob_key):
-        return ndb.Key(cls, blob_key == int(blob_key)).get()
-
-    @classmethod
-    def delete_by_key(cls, blob_key):
-        return ndb.Key(cls, cls.blob_key == blob_key).delete()
 # -------------------- POST ----------------------
-
-
 class Post(ndb.Model):
     title = ndb.StringProperty()
     category_id = ndb.IntegerProperty()
@@ -119,23 +104,23 @@ class PostHandler(webapp2.RequestHandler):
 
     def delete(self):
         self.options()
-        # try:
-        post_id = int(self.request.get("post_id"))
-        if post_id is not None:
-            # Get post to delete
-            post_to_delete = Post.get_by_id(post_id)
+        try:
+            post_id = int(self.request.get("post_id"))
+            if post_id is not None:
+                # Get post to delete
+                post_to_delete = Post.get_by_id(post_id)
+                
+                # Delete photo of this post in Blobstore
+                blobstore.delete(post_to_delete.image_id)
 
-            Photo.delete_by_key(post_to_delete.image_id)    
-            # Delete photo of this post in Blobstore
-            ViewPhotoHandler.delete_by_key(post_to_delete.image_id)
-            # Delete this post
-            Post.delete(post_id)
+                # Delete this post
+                Post.delete_by_id(post_id)
 
-            self.response.out.write("Complete")
-        else:
-            self.response.out.write("Delete Fail")
-        # except:
-        #     self.response.out.write("Delete Fail\nSome wrong in server")
+                self.response.out.write("Complete")
+            else:
+                self.response.out.write("Delete Fail")
+        except:
+            self.response.out.write("Delete Fail\nSome wrong in server")
 
     def getByCategory(self, categoryID_post_search):
         self.options()
@@ -151,7 +136,7 @@ class PostHandler(webapp2.RequestHandler):
                 },
                 "date_joined": str(c.date_joined),
                 "description": c.description,
-                "image": c.image_id,
+                "image": str(c.image_id),
             }
             for c in query]
 
@@ -171,7 +156,7 @@ class PostHandler(webapp2.RequestHandler):
                 },
                 "date_joined": str(c.date_joined),
                 "description": c.description,
-                "image": c.image_id,
+                "image": str(c.image_id),
             }
             for c in query]
 
@@ -195,8 +180,6 @@ class AddPost(blobstore_handlers.BlobstoreUploadHandler):
 
         #  put image
         upload = self.get_uploads()[0]
-        post_photo = Photo(blob_key=upload.key())
-        post_photo.put()
 
         # put post
         post_add = Post(
@@ -204,7 +187,7 @@ class AddPost(blobstore_handlers.BlobstoreUploadHandler):
             category_id=int(category_id),
             sapo=sapo,
             description=description,
-            image_id=post_photo.blob_key)
+            image_id=upload.key())
         post_add.put()
 
     def get_url(self):

@@ -2,27 +2,22 @@ import cgi
 from google.appengine.ext import ndb
 import webapp2
 import json
+from google.appengine.ext.webapp import blobstore_handlers
+from google.appengine.ext import blobstore
 
-class Image(ndb.Model):
-    image = ndb.BlobProperty()
-    date_joined = ndb.DateTimeProperty(auto_now_add=True)
+# -------------------- PHOTO ----------------------
 
 
-class ImageHandler (webapp2.RequestHandler):
-    def get(self, image_id):
-        self.options()
-        image_post = ndb.Key("Image", int(image_id)).get()
-        if image_post.image:
-            self.response.headers['Content-Type'] = 'image/png'
-            self.response.out.write(image_post.image)
-        else:
-            self.response.out.write('No image')
+class Photo(ndb.Model):
+    blob_key = ndb.BlobKeyProperty()
 
-    def options(self):
-        self.response.headers['Access-Control-Allow-Origin'] = '*'
-        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
-        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
+    @classmethod
+    def get_by_key(cls, blob_key):
+        return ndb.Key(cls, blob_key == int(blob_key)).get()
 
+    @classmethod
+    def delete_by_key(cls, blob_key):
+        return ndb.Key(cls, cls.blob_key == blob_key).delete()
 # -------------------- POST ----------------------
 
 
@@ -30,13 +25,21 @@ class Post(ndb.Model):
     title = ndb.StringProperty()
     category_id = ndb.IntegerProperty()
     sapo = ndb.StringProperty()
-    image_id = ndb.IntegerProperty()
+    image_id = ndb.BlobKeyProperty()
     description = ndb.TextProperty()
     date_joined = ndb.DateTimeProperty(auto_now_add=True)
 
     @classmethod
     def get_all(cls):
         return cls.query().fetch()
+
+    @classmethod
+    def get_by_id(cls, post_id):
+        return ndb.Key(cls, int(post_id)).get()
+
+    @classmethod
+    def delete_by_id(cls, post_id):
+        return ndb.Key(cls, int(post_id)).delete()
 
 
 class PostHandler(webapp2.RequestHandler):
@@ -57,60 +60,12 @@ class PostHandler(webapp2.RequestHandler):
                 },
                 "date_joined": str(c.date_joined),
                 "description": c.description,
-                "image": c.image_id,
+                "image": str(c.image_id),
             }
             for c in query]
 
         # write json to file
         self.response.out.write(json.dumps(data_json))
-
-    def post(self):
-        self.options()
-
-        # Put post main
-        title = self.request.get('title')
-        category_id = self.request.get('category_id')
-        image = "https://i.picsum.photos/id/1015/6000/4000.jpg"
-        sapo = self.request.get('sapo')
-        description = self.request.get('description')
-
-        image_upload = self.request.get('image')
-
-        # Check before adding
-        if title != None and title != '':
-            if category_id != None and category_id != '':
-                if image_upload != None and image_upload != '':
-                    if sapo != None and sapo != '':
-                        if description != None and description != '':
-
-                            # # upload image_upload
-                            if image_upload != None:
-                                #  put image
-                                subImageUpload = Image(image=image_upload)
-                                subImageUpload.put()
-
-                                # put post
-                                post_add = Post(title=title, category_id=int(
-                                    category_id), sapo=sapo, description=description, image_id=subImageUpload.key.id())
-                                post_add.put()
-
-                                # Notification
-                                self.response.out.write("Completed")
-                            else:
-                                self.response.out.write("None image")
-
-
-                        else:
-                            self.response.out.write(
-                                "Fail because of none description")
-                    else:
-                        self.response.out.write("Fail because of none sapo")
-                else:
-                    self.response.out.write("Fail because of none image")
-            else:
-                self.response.out.write("Fail because of none category_id")
-        else:
-            self.response.out.write("Fail because of none title")
 
     def edit(self):
         self.options()
@@ -164,15 +119,23 @@ class PostHandler(webapp2.RequestHandler):
 
     def delete(self):
         self.options()
-        post_delete = ndb.Key("Post", int(self.request.get('post_id')))
-        try:
-            if post_delete is not None:
-                post_delete.delete()
-                self.response.out.write("Complete")
-            else:
-                self.response.out.write("Delete Fail")
-        except:
-            self.response.out.write("Delete Fail\nSome wrong in server")
+        # try:
+        post_id = int(self.request.get("post_id"))
+        if post_id is not None:
+            # Get post to delete
+            post_to_delete = Post.get_by_id(post_id)
+
+            Photo.delete_by_key(post_to_delete.image_id)    
+            # Delete photo of this post in Blobstore
+            ViewPhotoHandler.delete_by_key(post_to_delete.image_id)
+            # Delete this post
+            Post.delete(post_id)
+
+            self.response.out.write("Complete")
+        else:
+            self.response.out.write("Delete Fail")
+        # except:
+        #     self.response.out.write("Delete Fail\nSome wrong in server")
 
     def getByCategory(self, categoryID_post_search):
         self.options()
@@ -195,8 +158,78 @@ class PostHandler(webapp2.RequestHandler):
         self.response.out.write(json.dumps(data_json))
 
     def getByTitle(self, title_post_search):
-        self.response.out.write(title_post_search)
+        self.options()
+        query = Post.query().filter(Post.title == title_post_search)
+        data_json = [
+            {
+                "id": c.key.id(),
+                "title": c.title,
+                "sapo": c.sapo,
+                "category": {
+                    "id": c.category_id,
+                    "label": ndb.Key("Category", int(c.category_id)).get().nameCategory
+                },
+                "date_joined": str(c.date_joined),
+                "description": c.description,
+                "image": c.image_id,
+            }
+            for c in query]
 
+        self.response.out.write(json.dumps(data_json))
+
+    def options(self):
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
+        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
+
+
+class AddPost(blobstore_handlers.BlobstoreUploadHandler):
+    def post(self):
+        self.options()
+
+        # Put post main
+        title = self.request.get('title')
+        category_id = self.request.get('category_id')
+        sapo = self.request.get('sapo')
+        description = self.request.get('description')
+
+        #  put image
+        upload = self.get_uploads()[0]
+        post_photo = Photo(blob_key=upload.key())
+        post_photo.put()
+
+        # put post
+        post_add = Post(
+            title=title,
+            category_id=int(category_id),
+            sapo=sapo,
+            description=description,
+            image_id=post_photo.blob_key)
+        post_add.put()
+
+    def get_url(self):
+        self.options()
+        self.response.out.write(blobstore.create_upload_url('/upload_photo'))
+
+    def options(self):
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
+        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
+
+
+class ViewPhotoHandler(blobstore_handlers.BlobstoreDownloadHandler):
+    def get(self, photo_key):
+        self.options()
+        if not blobstore.get(photo_key):
+            self.error(404)
+        else:
+            self.send_blob(photo_key)
+
+    @classmethod
+    def delete_by_key(cls, photo_key):
+        if blobstore.get(photo_key):
+            blobstore.delete(photo_key)
+    
     def options(self):
         self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
@@ -290,9 +323,6 @@ app = webapp2.WSGIApplication([
 
 
     # Route post
-    webapp2.Route("/addPost", PostHandler,
-                  handler_method="post", methods=['POST']),
-
     webapp2.Route("/editPost", PostHandler,
                   handler_method="edit", methods=['POST']),
 
@@ -308,7 +338,14 @@ app = webapp2.WSGIApplication([
     webapp2.Route("/post/category/<categoryID_post_search:\d+>/json", PostHandler,
                   handler_method="getByCategory", methods=['GET']),
 
-    # Route image
-    webapp2.Route("/image/post/<image_id>", ImageHandler,
-                  handler_method="get")
+    # Rout add
+    webapp2.Route("/post/get-url-add", AddPost,
+                  handler_method="get_url", methods=['GET']),
+
+    webapp2.Route("/upload_photo", AddPost,
+                  handler_method="post", methods=['POST']),
+
+    webapp2.Route('/view_photo/<photo_key>', ViewPhotoHandler,
+                  handler_method="get", methods=['GET']),
+
 ], debug=True)

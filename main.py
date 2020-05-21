@@ -4,8 +4,72 @@ import webapp2
 import json
 from google.appengine.ext.webapp import blobstore_handlers
 from google.appengine.ext import blobstore
+from google.appengine.api import search
+
+
+class Comment(ndb.Model):
+    post_id = ndb.IntegerProperty()
+    username = ndb.StringProperty()
+    content = ndb.StringProperty()
+    date_joined = ndb.DateTimeProperty(auto_now_add=True)
+
+
+class CommentHandler(webapp2.RequestHandler):
+    def post(self):
+        self.options()
+        username = self.request.get('username')
+        post_id = int(self.request.get('post_id'))
+        content = self.request.get('content')
+
+        if username != "" and post_id != "" and content != "":
+            # Put datastore
+            comment_post = Comment(
+                username=username,
+                post_id=post_id,
+                content=content)
+            comment_post.put()
+
+            # Put document
+            post_document = search.Document(
+                doc_id=str(comment_post.key.id()),
+                fields=[
+                    search.TextField(name="post_id", value=str(post_id)),
+                    search.TextField(name="username", value=username),
+                    search.TextField(name="content", value=content),
+                ]
+            )
+            # Put post document
+            index = search.Index('comment')
+            index.put(post_document)
+
+            self.response.out.write(comment_post.key.id())
+        else:
+            self.response.out.write("Fail")
+
+    def get_by_post_id(self, post_id):
+        self.options()
+        index = search.Index('comment')
+        document = index.search("post_id = {}".format(post_id))
+
+        data_json = [
+            {
+                "comment_id": comment.fields[0].value,
+                "username": comment.fields[1].value,    
+                "content": comment.fields[2].value,
+            }
+            for comment in document
+        ]
+
+        self.response.out.write(json.dumps(data_json))
+
+    def options(self):
+        self.response.headers['Access-Control-Allow-Origin'] = '*'
+        self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
+        self.response.headers['Access-Control-Allow-Methods'] = 'POST, GET, PUT, DELETE'
 
 # -------------------- POST ----------------------
+
+
 class Post(ndb.Model):
     title = ndb.StringProperty()
     category_id = ndb.IntegerProperty()
@@ -24,6 +88,12 @@ class Post(ndb.Model):
 
     @classmethod
     def delete_by_id(cls, post_id):
+        # Get post to delete
+        post_to_delete = Post.get_by_id(post_id)
+
+        # Delete photo of this post in Blobstore
+        blobstore.delete(post_to_delete.image_id)
+        # Delete this post
         return ndb.Key(cls, int(post_id)).delete()
 
 
@@ -93,6 +163,7 @@ class PostHandler(webapp2.RequestHandler):
                     editSusses = False
 
                 if editSusses == True:
+                    # Put this post updated
                     postEdit.put()
                     self.response.out.write("Complete")
                 else:
@@ -105,16 +176,14 @@ class PostHandler(webapp2.RequestHandler):
     def delete(self):
         self.options()
         try:
-            post_id = int(self.request.get("post_id"))
+            post_id = self.request.get("post_id")
             if post_id is not None:
-                # Get post to delete
-                post_to_delete = Post.get_by_id(post_id)
-                
-                # Delete photo of this post in Blobstore
-                blobstore.delete(post_to_delete.image_id)
 
                 # Delete this post
-                Post.delete_by_id(post_id)
+                Post.delete_by_id(int(post_id))
+                # Delete this post in document
+                index = search.Index('post')
+                index.delete(post_id)
 
                 self.response.out.write("Complete")
             else:
@@ -162,6 +231,31 @@ class PostHandler(webapp2.RequestHandler):
 
         self.response.out.write(json.dumps(data_json))
 
+    def get_detail(self, post_id):
+        if post_id is not None:
+            self.options()
+            post_detail = Post.get_by_id(post_id)
+
+            # render file json
+            data_json = [
+                {
+                    "id": post_detail.key.id(),
+                    "title": post_detail.title,
+                    "sapo": post_detail.sapo,
+                    "category": {
+                        "id": post_detail.category_id,
+                        "label": ndb.Key("Category", int(post_detail.category_id)).get().nameCategory
+                    },
+                    "date_joined": str(post_detail.date_joined),
+                    "description": post_detail.description,
+                    "image": str(post_detail.image_id),
+                }
+            ]
+            # write json to file
+            self.response.out.write(json.dumps(data_json))
+        else:
+            return
+
     def options(self):
         self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
@@ -190,6 +284,21 @@ class AddPost(blobstore_handlers.BlobstoreUploadHandler):
             image_id=upload.key())
         post_add.put()
 
+        # Create document with this post ready to add
+        post_document = search.Document(
+            doc_id=str(post_add.key.id()),
+            fields=[
+                search.TextField(name="title", value=title),
+                search.TextField(name="category_id", value=str(category_id)),
+                search.TextField(name="sapo", value=sapo),
+                search.TextField(name="description", value=description),
+                search.TextField(name="image_id", value=str(upload.key())),
+            ]
+        )
+        # Put post document
+        index = search.Index('post')
+        index.put(post_document)
+
     def get_url(self):
         self.options()
         self.response.out.write(blobstore.create_upload_url('/upload_photo'))
@@ -212,7 +321,7 @@ class ViewPhotoHandler(blobstore_handlers.BlobstoreDownloadHandler):
     def delete_by_key(cls, photo_key):
         if blobstore.get(photo_key):
             blobstore.delete(photo_key)
-    
+
     def options(self):
         self.response.headers['Access-Control-Allow-Origin'] = '*'
         self.response.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept'
@@ -221,7 +330,6 @@ class ViewPhotoHandler(blobstore_handlers.BlobstoreDownloadHandler):
 
 
 # -------------------- CATEGORY ----------------------
-
 class Category(ndb.Model):
     nameCategory = ndb.StringProperty()
     date_joined = ndb.DateTimeProperty(auto_now_add=True)
@@ -315,11 +423,22 @@ app = webapp2.WSGIApplication([
     webapp2.Route("/post/json", PostHandler,
                   handler_method="get", methods=['GET']),
 
+    webapp2.Route("/post/detail/<post_id>/json", PostHandler,
+                  handler_method="get_detail", methods=['GET']),
+
     webapp2.Route("/post/title/<title_post_search>/json",
                   PostHandler, handler_method="getByTitle", methods=['GET']),
 
     webapp2.Route("/post/category/<categoryID_post_search:\d+>/json", PostHandler,
                   handler_method="getByCategory", methods=['GET']),
+
+
+    # Route Comment
+    webapp2.Route("/comment/addComment", CommentHandler,
+                  handler_method="post", methods=['POST']),
+
+    webapp2.Route("/comment/get/<post_id>/json", CommentHandler,
+                  handler_method="get_by_post_id", methods=['GET']),
 
     # Rout add
     webapp2.Route("/post/get-url-add", AddPost,
